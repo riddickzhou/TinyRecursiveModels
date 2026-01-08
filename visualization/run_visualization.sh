@@ -17,15 +17,21 @@ echo "--- Starting Visualization ---"
 echo "Job ID: $SLURM_JOB_ID"
 date
 
-CHECKPOINT=${1:-"checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_att_sudoku/step_65100"}
-DATA_PATH=${2:-"data/sudoku-extreme-1k-aug-1000"}
-OUTPUT_DIR=${3:-"outputs/visualization"}
-NUM_SAMPLES=${4:-5}
+DATA_PATH=${1:-"data/sudoku-extreme-1k-aug-1000"}
+NUM_SAMPLES=${2:-5}
 
+echo "--- Running ATT model ---"
 python visualization/visualize_latents.py \
-    --checkpoint "$CHECKPOINT" \
+    --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_att_sudoku/step_65100" \
     --data_path "$DATA_PATH" \
-    --output_dir "$OUTPUT_DIR" \
+    --output_dir "outputs/visualization/att" \
+    --num_samples "$NUM_SAMPLES"
+
+echo "--- Running MLP model ---"
+python visualization/visualize_latents.py \
+    --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_mlp_t_sudoku/step_65100" \
+    --data_path "$DATA_PATH" \
+    --output_dir "outputs/visualization/mlp" \
     --num_samples "$NUM_SAMPLES"
 
 echo "--- Visualization complete! ---"
