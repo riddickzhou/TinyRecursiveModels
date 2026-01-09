@@ -209,8 +209,8 @@ echo "# All use MLP-T                      #"
 echo "######################################"
 echo ""
 
-# 2 layers, 1024 dim (2x width)
-run_experiment 2 1024 "_2xwidth"
+# # 2 layers, 1024 dim (2x width)
+# run_experiment 2 1024 "_2xwidth"
 
 # 2 layers, 2048 dim (4x width)
 run_experiment 2 2048 "_4xwidth"

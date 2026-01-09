@@ -147,7 +147,8 @@ checkpoints/
 *.h5
 
 # Outputs and results
-outputs/
+outputs/*
+!outputs/visualization/
 results/
 runs/
 
