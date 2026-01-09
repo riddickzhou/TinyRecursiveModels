@@ -166,5 +166,9 @@ temp/
 # Build artifacts
 build_dataset.log
 
+# PyTorch compilation caches
+.inductor_cache/
+.triton_cache/
+
 # Shell scripts (uncomment if needed)
 # *.sh
