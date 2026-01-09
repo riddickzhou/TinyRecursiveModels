@@ -115,7 +115,7 @@ def visualize_sudoku(data, idx, save_path):
         to_sudoku(data['tokenized_zL'][idx].numpy().reshape(9, 9)),
         None
     ]
-    titles = ['Input x', 'Target y', 'Prediction ŷ', 'Tokenized z_H', 'Tokenized z_L', '']
+    titles = ['Input x', 'Output y', 'Prediction ŷ', 'Latent y\n(before lm_head)', 'Latent z\n(reasoning feature)', '']
 
     for ax, title, grid in zip(axes.flat, titles, grids):
         if grid is not None:
