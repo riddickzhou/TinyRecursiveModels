@@ -14,13 +14,30 @@
 
 set -e
 
+# Load environment variables from .env file
+# Use $SLURM_SUBMIT_DIR if available (when running via sbatch), otherwise use current directory
+if [ -n "$SLURM_SUBMIT_DIR" ]; then
+    SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a  # automatically export all variables
+    source "$SCRIPT_DIR/.env"
+    set +a
+    echo "Loaded environment variables from .env"
+else
+    echo "Warning: .env file not found at $SCRIPT_DIR/.env"
+fi
+
 echo "--- Starting Experiment: pretrain_mlp_t_sudoku ---"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on nodes: $SLURM_JOB_NODELIST"
 date
 
 # Use torchrun to launch script across all allocated GPUs
-# WANDB_MODE=online torchrun --nproc_per_node=8 pretrain.py \
+# WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/torchrun --nproc_per_node=8 pretrain.py \
 # arch=trm \
 # data_paths="[data/sudoku-extreme-1k-aug-1000]" \
 # evaluators="[]" \
@@ -41,11 +58,11 @@ date
 echo "--- MLP run finished. Starting ATT run. ---"
 date
 
-WANDB_MODE=online torchrun --nproc_per_node=8 pretrain.py \
+WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/torchrun --nproc_per_node=8 pretrain.py \
 arch=trm \
 data_paths="[data/sudoku-extreme-1k-aug-1000]" \
 evaluators="[]" \
-epochs=50000 \d
+epochs=50000 \
 eval_interval=5000 \
 lr=1e-4 \
 puzzle_emb_lr=1e-4 \
