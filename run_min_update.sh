@@ -1,16 +1,16 @@
 #!/bin/bash
 
-#SBATCH --job-name=n_t_exp
+#SBATCH --job-name=min_update
 #SBATCH --account=rl
 #SBATCH --partition=compute
 #SBATCH --qos=high
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:8
-#SBATCH --mem=1000G
+#SBATCH --gres=gpu:2
+#SBATCH --mem=100G
 #SBATCH --time=7-00:00:00
-#SBATCH --output=outputs/n_t_experiments/slurm-%j.out
+#SBATCH --output=outputs/min_update_experiments/slurm-%j.out
 
 set -e
 
@@ -31,7 +31,7 @@ else
 fi
 
 echo "=================================="
-echo "n and T Scaling Experiments"
+echo "Minimal Update Experiments (n=0 vs n=1)"
 echo "=================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on nodes: $SLURM_JOB_NODELIST"
@@ -39,12 +39,12 @@ echo "Start time: $(date)"
 echo "=================================="
 
 # Create output directory
-OUTPUT_DIR="outputs/n_t_experiments"
+OUTPUT_DIR="outputs/min_update_experiments"
 mkdir -p "$OUTPUT_DIR"
 
-# Base configuration - EXACT copy from run_sudoku_experiments.sh (MLP variant)
-# Paper notation: n = L_cycles, T = H_cycles
-# Paper optimal: n=6, T=3 (87.4% accuracy, depth=42)
+# Base configuration - EXACT copy from run_n_t_experiments.sh
+# Paper baseline: n=6, T=3 (87.4% accuracy, depth=42)
+# Testing: Does recursion matter? n=0 vs n=1
 DATA_PATH="data/sudoku-extreme-1k-aug-1000"
 EPOCHS=50000
 EVAL_INTERVAL=5000
@@ -62,16 +62,17 @@ echo "[]" > "$RESULTS_FILE"
 
 # Function to run experiment and save results
 # NOTE: All experiments use 2 layers, 512 hidden, MLP-T (paper's optimal architecture)
-# Only vary: H_cycles (T) and L_cycles (n)
+# Only vary: L_cycles (n) - testing n=0 and n=1
+# Keep T=3 same as baseline
 run_experiment() {
-    local h_cycles=$1  # T in paper
-    local l_cycles=$2  # n in paper
+    local h_cycles=$1  # T in paper (fixed at 3)
+    local l_cycles=$2  # n in paper (testing 0 and 1)
     local run_suffix=$3
 
     # Calculate effective depth: (T + n) * layers = (h_cycles + l_cycles) * 2
     local depth=$((($h_cycles + $l_cycles) * 2))
 
-    local run_name="n_t_T${h_cycles}_n${l_cycles}${run_suffix}"
+    local run_name="min_update_T${h_cycles}_n${l_cycles}${run_suffix}"
 
     echo ""
     echo "=========================================="
@@ -82,9 +83,9 @@ run_experiment() {
     echo "  Start time: $(date)"
     echo "=========================================="
 
-    # Run training - EXACT args from run_sudoku_experiments.sh MLP variant
-    # Only change: arch.H_cycles and arch.L_cycles
-    WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/python -m torch.distributed.run --nproc_per_node=8 pretrain.py \
+    # Run training - EXACT args from run_n_t_experiments.sh
+    # Only change: arch.L_cycles
+    WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/python -m torch.distributed.run --nproc_per_node=2 pretrain.py \
         arch=trm \
         data_paths="[$DATA_PATH]" \
         evaluators="[]" \
@@ -117,23 +118,27 @@ run_experiment() {
 }
 
 # ==========================================
-# Experiment Set: n and T Scaling
+# Experiment Set: Minimal Update (n=0 vs n=1)
 # ==========================================
 echo ""
 echo "######################################"
-echo "# n & T SCALING EXPERIMENTS          #"
+echo "# MINIMAL UPDATE EXPERIMENTS         #"
 echo "# Architecture: 2L, 512H, MLP-T      #"
 echo "# Baseline: T=3, n=6 (87.4%)         #"
+echo "# Testing: Does latent recursion     #"
+echo "#          matter at all?            #"
 echo "######################################"
 echo ""
 
-# Baseline: T=3, n=6 (depth=42, 87.4% from paper)
+echo "### Experiment 1: n=0 - No latent updates (T=3, n=0) ###"
+echo "Expected: z_L never updated in latent_recursion loop"
+echo "Only y updated using stale z_L from previous supervision step"
+run_experiment 3 0 "_no_latent_updates"
 
-# echo "### Experiment 1: 2x n - Double L_cycles (T=3, n=12) ###"
-# run_experiment 3 12 "_2xn"
-
-echo "### Experiment 2: 2x T - Double H_cycles (T=6, n=6) ###"
-run_experiment 6 6 "_2xT"
+echo "### Experiment 2: n=1 - Minimal latent updates (T=3, n=1) ###"
+echo "Expected: z_L updated once, then y updated"
+echo "Minimal recursion within each supervision step"
+run_experiment 3 1 "_minimal_latent_updates"
 
 # ==========================================
 # Generate Final Summary Report
@@ -160,7 +165,7 @@ with open(results_file) as f:
 
 print()
 print('=' * 90)
-print('n AND T SCALING EXPERIMENTS - RESULTS SUMMARY')
+print('MINIMAL UPDATE EXPERIMENTS - RESULTS SUMMARY')
 print('=' * 90)
 print()
 print('Architecture: 2 layers, 512 hidden, MLP-T')
@@ -171,7 +176,7 @@ print()
 results_sorted = sorted(results, key=lambda x: x.get('test_metrics', {}).get('exact_accuracy', 0), reverse=True)
 
 # Table header
-print(f'{'Rank':<5} {'Run Name':<35} {'T':<5} {'n':<5} {'Depth':<8} {'Test Acc %':<12}')
+print(f'{'Rank':<5} {'Run Name':<45} {'T':<5} {'n':<5} {'Depth':<8} {'Test Acc %':<12}')
 print('-' * 90)
 
 for i, result in enumerate(results_sorted, 1):
@@ -188,16 +193,19 @@ for i, result in enumerate(results_sorted, 1):
     if exact_acc > 0 and exact_acc < 1:
         exact_acc *= 100
 
-    print(f'{i:<5} {run_name:<35} {h_cycles:<5} {l_cycles:<5} {depth:<8} {exact_acc:<12.2f}')
+    print(f'{i:<5} {run_name:<45} {h_cycles:<5} {l_cycles:<5} {depth:<8} {exact_acc:<12.2f}')
 
 print()
 print('=' * 90)
 print()
-print('Experiments:')
-print('  1. T=3, n=12 (2x n) - Double L_cycles, depth=60')
-print('  2. T=6, n=6  (2x T) - Double H_cycles, depth=48')
+print('Hypothesis Test:')
+print('  If n=0 or n=1 achieve similar accuracy to n=6 baseline (87.4%),')
+print('  then latent recursion within each supervision step is NOT critical.')
+print('  Instead, deep supervision across N_sup=16 steps is the main driver.')
 print()
-print('Expected: Likely diminishing returns or overfitting vs baseline (87.4%)')
+print('Expected from Paper Table 3:')
+print('  n=1 (with T=1): 63.2% accuracy')
+print('  Baseline n=6 (with T=3): 87.4% accuracy')
 print()
 print(f'Full results saved to: {results_file}')
 print(f'Individual run results: $OUTPUT_DIR/*_metrics.json')

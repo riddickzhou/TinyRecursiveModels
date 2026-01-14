@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:8
-#SBATCH --mem=1000G
+#SBATCH --mem=128G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=outputs/scale_experiments/slurm-%j.out
 
@@ -105,70 +105,8 @@ run_experiment() {
     echo "Training finished with exit code: $exit_code"
     echo "End time: $(date)"
 
-    # Extract and save metrics
-    if [ $exit_code -eq 0 ]; then
-        echo "Extracting metrics for $run_name..."
-
-        # Create individual result file
-        local result_file="$OUTPUT_DIR/${run_name}_metrics.json"
-
-        # Try to extract from wandb (with timeout)
-        python extract_final_metrics.py \
-            --run_name "$run_name" \
-            --project_name "$PROJECT_NAME" \
-            --output_file "$result_file" \
-            --max_wait_hours 1 || echo "Warning: Could not extract wandb metrics for $run_name"
-
-        # Add configuration info to result
-        if [ -f "$result_file" ]; then
-            # Create a comprehensive result entry
-            python -c "
-import json
-import sys
-
-try:
-    with open('$result_file', 'r') as f:
-        data = json.load(f)
-
-    # Add experiment configuration
-    data['experiment_config'] = {
-        'L_layers': $layers,
-        'hidden_size': $hidden_size,
-        'mlp_t': True,
-        'pos_encodings': 'none',
-        'H_cycles': $H_CYCLES,
-        'L_cycles': $L_CYCLES,
-        'epochs': $EPOCHS,
-        'lr': $LR,
-        'weight_decay': $WEIGHT_DECAY,
-    }
-
-    # Save back
-    with open('$result_file', 'w') as f:
-        json.dump(data, f, indent=2)
-
-    # Append to master results
-    try:
-        with open('$RESULTS_FILE', 'r') as f:
-            results = json.load(f)
-    except:
-        results = []
-
-    results.append(data)
-
-    with open('$RESULTS_FILE', 'w') as f:
-        json.dump(results, f, indent=2)
-
-    # Print summary
-    test_acc = data.get('test_metrics', {}).get('exact_accuracy', 'N/A')
-    print(f'✓ {data[\"run_name\"]}: Test Exact Accuracy = {test_acc}')
-
-except Exception as e:
-    print(f'Error processing results: {e}', file=sys.stderr)
-    sys.exit(1)
-"
-        fi
-    else
+    # Extraction logic removed as per request (view wandb directly)
+    if [ $exit_code -ne 0 ]; then
         echo "ERROR: Training failed for $run_name"
     fi
 
@@ -213,7 +151,7 @@ echo ""
 # run_experiment 2 1024 "_2xwidth"
 
 # 2 layers, 2048 dim (4x width)
-run_experiment 2 2048 "_4xwidth"
+# run_experiment 2 2048 "_4xwidth"
 
 # ==========================================
 # Experiment 3: Combined Ablation
@@ -227,7 +165,7 @@ echo "######################################"
 echo ""
 
 # 4 layers, 1024 dim (double both)
-run_experiment 4 1024 "_4L_2xwidth"
+# run_experiment 4 1024 "_4L_2xwidth"
 
 # 4 layers, 2048 dim (4 layers + 4x width)
 run_experiment 4 2048 "_4L_4xwidth"

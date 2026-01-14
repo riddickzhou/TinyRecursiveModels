@@ -15,10 +15,11 @@
 set -e
 
 # Parse command line arguments
-# Usage: sbatch run_SFT.sh [MODEL_NAME]
+# Usage: sbatch run_SFT.sh [MODEL_NAME] [NUM_GPUS]
 # If MODEL_NAME is provided, only train that model
 # Otherwise, train all 5 models sequentially
 SELECTED_MODEL="${1:-}"
+NUM_GPUS="${2:-1}"
 
 # Load environment variables from .env file
 if [ -n "$SLURM_SUBMIT_DIR" ]; then
@@ -36,11 +37,17 @@ else
     echo "Warning: .env file not found at $SCRIPT_DIR/.env"
 fi
 
+# Silence HuggingFace deprecation warning by forcefully setting HF_HOME if legacy env var is present
+if [ -n "$TRANSFORMERS_CACHE" ] && [ -z "$HF_HOME" ]; then
+    export HF_HOME="$TRANSFORMERS_CACHE"
+fi
+
 echo "=================================="
-echo "LLM Supervised Fine-tuning on Sudoku"
+echo "LLM Supervised Fine-tuning on Sudoku (DeepSpeed)"
 echo "=================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on nodes: $SLURM_JOB_NODELIST"
+echo "Number of GPUs: $NUM_GPUS"
 echo "Start time: $(date)"
 echo "=================================="
 
@@ -51,15 +58,15 @@ mkdir -p "$OUTPUT_DIR"
 # Use explicit python path from trm-vllm conda environment
 # Avoids conda activation issues when submitted from active conda env
 PYTHON_BIN="/pm/conda/envs/users/linbo/trm-vllm/bin/python"
+DEEPSPEED_BIN="/pm/conda/envs/users/linbo/trm-vllm/bin/deepspeed"
 
-# Training configuration
+# Training configuration - Increased batch size by 75% for better VRAM usage
 DATA_PATH="data/FT.json"
 NUM_EPOCHS=3
 BATCH_SIZE=4
 GRAD_ACCUM=4
 LEARNING_RATE=2e-5
 MAX_SEQ_LENGTH=2048
-
 # All available models
 ALL_MODELS=(
     "data/LLM/Qwen--Qwen2.5-1.5B-Instruct"
@@ -88,21 +95,61 @@ for MODEL_PATH in "${MODELS[@]}"; do
     echo "Fine-tuning: $MODEL_NAME"
     echo "Base model: $MODEL_PATH"
     echo "Output dir: $SFT_OUTPUT_DIR"
+    echo "Using DeepSpeed with $NUM_GPUS GPU(s)"
     echo "Start time: $(date)"
     echo "=========================================="
 
-    $PYTHON_BIN LLM/SFT/run_SFT.py \
+    # Generate random port to avoid conflicts when running multiple jobs
+    MASTER_PORT=$((29500 + RANDOM % 1000))
+    echo "Using master port: $MASTER_PORT"
+
+    # Select DeepSpeed config
+    # 1.5B/3B: ZeRO-2 Pure (Fastest)
+    # 7B: ZeRO-3 Pure (Memory Safe + FA2)
+    if [[ "$MODEL_NAME" == *"1.5B"* ]] || [[ "$MODEL_NAME" == *"3B"* ]]; then
+        DEEPSPEED_CONFIG="LLM/SFT/ds_config_pure.json"
+        echo "Using Pure GPU DeepSpeed config (ZeRO-2) for: $MODEL_NAME"
+    else
+        DEEPSPEED_CONFIG="LLM/SFT/ds_config.json"
+        echo "Using ZeRO-3 DeepSpeed config for: $MODEL_NAME"
+    fi
+
+    # Batch Size Logic
+    # Default: BS=4, GA=4 (Effective=16)
+    # Multi-GPU: BS=2, GA=4 (Effective=8/gpu -> 16 total)
+    EFFECTIVE_BATCH_SIZE=$BATCH_SIZE
+    EFFECTIVE_GRAD_ACCUM=$GRAD_ACCUM
+
+    if [ $NUM_GPUS -gt 1 ]; then
+        if [[ "$MODEL_NAME" == *"7B"* ]]; then
+             # For 7B with ZeRO-3 + FlashAttn-2: 
+             # We have enough memory to INCREASE batch size (Fixes Slowness)
+             EFFECTIVE_BATCH_SIZE=4
+             EFFECTIVE_GRAD_ACCUM=2
+             echo "Using ZeRO-3 Optimized Batch Size ($EFFECTIVE_BATCH_SIZE) for 7B model"
+        else
+             EFFECTIVE_BATCH_SIZE=2
+             echo "Reducing batch size to $EFFECTIVE_BATCH_SIZE for multi-GPU"
+        fi
+    fi
+
+    # Help with memory fragmentation (Renamed from PYTORCH_CUDA_ALLOC_CONF)
+    export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+    # Launch with DeepSpeed
+    $DEEPSPEED_BIN --num_gpus=$NUM_GPUS --master_port=$MASTER_PORT LLM/SFT/run_SFT.py \
         --model_path "$MODEL_PATH" \
         --data_path "$DATA_PATH" \
         --output_dir "$SFT_OUTPUT_DIR" \
         --num_samples -1 \
         --num_epochs $NUM_EPOCHS \
-        --batch_size $BATCH_SIZE \
-        --gradient_accumulation_steps $GRAD_ACCUM \
+        --batch_size $EFFECTIVE_BATCH_SIZE \
+        --gradient_accumulation_steps $EFFECTIVE_GRAD_ACCUM \
         --learning_rate $LEARNING_RATE \
         --max_seq_length $MAX_SEQ_LENGTH \
         --save_steps 500 \
-        --logging_steps 10
+        --logging_steps 10 \
+        --deepspeed_config $DEEPSPEED_CONFIG
 
     EXIT_CODE=$?
 
@@ -134,7 +181,7 @@ model_dirs = sorted([d for d in output_dir.iterdir() if d.is_dir()])
 
 print()
 print('=' * 80)
-print('SFT SUMMARY')
+print('SFT SUMMARY (DeepSpeed)')
 print('=' * 80)
 print()
 
@@ -151,6 +198,7 @@ for model_dir in model_dirs:
         print(f'  Epochs: {config.get(\"num_epochs\", \"?\")}')
         print(f'  Samples: {config.get(\"num_samples\", \"?\")}')
         print(f'  LR: {config.get(\"learning_rate\", \"?\")}')
+        print(f'  DeepSpeed: {config.get(\"deepspeed_config\", \"?\")}')
         print()
 
 print('=' * 80)

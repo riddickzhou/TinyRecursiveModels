@@ -8,11 +8,18 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=128G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=outputs/LLM/slurm-%j.out
 
-set -e
+# Don't exit on error - we handle crashes with retry logic
+set +e
+
+# Parse command line arguments
+# Usage: sbatch run_llm_base.sh [MODEL_PATH]
+# If MODEL_PATH is provided, only eval that model
+# Otherwise, eval all models sequentially
+SELECTED_MODEL="${1:-}"
 
 # Load environment variables from .env file
 if [ -n "$SLURM_SUBMIT_DIR" ]; then
@@ -30,6 +37,18 @@ else
     echo "Warning: .env file not found at $SCRIPT_DIR/.env"
 fi
 
+# Set cache directories to writable locations to avoid permission errors
+export HF_HOME="${SCRIPT_DIR}/.cache/huggingface"
+export TRANSFORMERS_CACHE="${SCRIPT_DIR}/.cache/huggingface/transformers"
+export VLLM_CACHE_ROOT="${SCRIPT_DIR}/.cache/vllm"
+export FLASHINFER_WORKSPACE_BASE="${SCRIPT_DIR}"
+export XDG_CACHE_HOME="${SCRIPT_DIR}/.cache"
+# Disable torch compile to avoid nvcc permission errors
+export TORCH_COMPILE_DISABLE=1
+
+# Create cache directories
+mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$VLLM_CACHE_ROOT" "$XDG_CACHE_HOME"
+
 echo "=================================="
 echo "LLM Baseline Evaluation on Sudoku"
 echo "=================================="
@@ -42,12 +61,12 @@ echo "=================================="
 OUTPUT_DIR="outputs/LLM"
 mkdir -p "$OUTPUT_DIR"
 
-# Activate vLLM environment
-module load conda/new
-source activate trm-vllm
+# Use explicit python path from trm-vllm conda environment
+# Avoids conda activation issues when submitted from active conda env
+PYTHON_BIN="/pm/conda/envs/users/linbo/trm-vllm/bin/python"
 
-# Model list
-MODELS=(
+# All available models
+ALL_MODELS=(
     "data/LLM/Qwen--Qwen2.5-1.5B-Instruct"
     "data/LLM/Qwen--Qwen2.5-3B-Instruct"
     "data/LLM/Qwen--Qwen2.5-7B-Instruct"
@@ -55,9 +74,19 @@ MODELS=(
     "data/LLM/allenai--Olmo-3-7B-Think"
 )
 
+# If SELECTED_MODEL is provided, only eval that model
+if [ -n "$SELECTED_MODEL" ]; then
+    MODELS=("$SELECTED_MODEL")
+    echo "Evaluating only: $SELECTED_MODEL"
+else
+    MODELS=("${ALL_MODELS[@]}")
+    echo "Evaluating all models sequentially"
+fi
+
 # Run evaluation on all test samples (422786 total, -1 means all)
 NUM_SAMPLES=-1
-TENSOR_PARALLEL_SIZE=1
+# Allow overriding TP size from second argument, default to 1
+TENSOR_PARALLEL_SIZE="${2:-1}"
 
 # Run each model
 for MODEL_PATH in "${MODELS[@]}"; do
@@ -71,20 +100,35 @@ for MODEL_PATH in "${MODELS[@]}"; do
     echo "Start time: $(date)"
     echo "=========================================="
 
-    python LLM/eval_llm_base.py \
-        --model_path "$MODEL_PATH" \
-        --num_samples "$NUM_SAMPLES" \
-        --temperature 0.0 \
-        --max_tokens 8192 \
-        --tensor_parallel_size "$TENSOR_PARALLEL_SIZE"
+    # Auto re-launch on crash (up to 5 attempts)
+    MAX_ATTEMPTS=5
+    ATTEMPT=1
+    while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+        echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
 
-    EXIT_CODE=$?
+        $PYTHON_BIN LLM/eval_llm_base.py \
+            --model_path "$MODEL_PATH" \
+            --num_samples "$NUM_SAMPLES" \
+            --temperature 0.0 \
+            --max_tokens 8192 \
+            --tensor_parallel_size "$TENSOR_PARALLEL_SIZE"
 
-    if [ $EXIT_CODE -eq 0 ]; then
-        echo "✓ Successfully evaluated $MODEL_NAME"
-    else
-        echo "✗ Failed to evaluate $MODEL_NAME (exit code: $EXIT_CODE)"
-    fi
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Successfully evaluated $MODEL_NAME"
+            break
+        else
+            echo "✗ Attempt $ATTEMPT failed (exit code: $EXIT_CODE)"
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                echo "Retrying in 10 seconds..."
+                sleep 10
+            else
+                echo "✗ Failed to evaluate $MODEL_NAME after $MAX_ATTEMPTS attempts"
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+        fi
+    done
 
     echo "End time: $(date)"
     echo "=========================================="
@@ -99,7 +143,7 @@ echo "=========================================="
 echo "End time: $(date)"
 echo ""
 
-python -c "
+$PYTHON_BIN -c "
 import json
 from pathlib import Path
 

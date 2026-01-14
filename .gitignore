@@ -173,3 +173,5 @@ build_dataset.log
 
 # Shell scripts (uncomment if needed)
 # *.sh
+
+.*/
