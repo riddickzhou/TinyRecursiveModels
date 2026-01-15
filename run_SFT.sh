@@ -15,11 +15,13 @@
 set -e
 
 # Parse command line arguments
-# Usage: sbatch run_SFT.sh [MODEL_NAME] [NUM_GPUS]
+# Usage: sbatch run_SFT.sh [MODEL_NAME] [NUM_GPUS] [RESUME_CHECKPOINT]
 # If MODEL_NAME is provided, only train that model
 # Otherwise, train all 5 models sequentially
+# RESUME_CHECKPOINT is optional path to checkpoint to resume from
 SELECTED_MODEL="${1:-}"
 NUM_GPUS="${2:-1}"
+RESUME_CHECKPOINT="${3:-}"
 
 # Load environment variables from .env file
 if [ -n "$SLURM_SUBMIT_DIR" ]; then
@@ -48,6 +50,7 @@ echo "=================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on nodes: $SLURM_JOB_NODELIST"
 echo "Number of GPUs: $NUM_GPUS"
+echo "Resume checkpoint: ${RESUME_CHECKPOINT:-None}"
 echo "Start time: $(date)"
 echo "=================================="
 
@@ -136,6 +139,13 @@ for MODEL_PATH in "${MODELS[@]}"; do
     # Help with memory fragmentation (Renamed from PYTORCH_CUDA_ALLOC_CONF)
     export PYTORCH_ALLOC_CONF=expandable_segments:True
 
+    # Build resume argument if checkpoint provided
+    RESUME_ARG=""
+    if [ -n "$RESUME_CHECKPOINT" ]; then
+        RESUME_ARG="--resume_from_checkpoint $RESUME_CHECKPOINT"
+        echo "Resuming from checkpoint: $RESUME_CHECKPOINT"
+    fi
+
     # Launch with DeepSpeed
     $DEEPSPEED_BIN --num_gpus=$NUM_GPUS --master_port=$MASTER_PORT LLM/SFT/run_SFT.py \
         --model_path "$MODEL_PATH" \
@@ -149,7 +159,8 @@ for MODEL_PATH in "${MODELS[@]}"; do
         --max_seq_length $MAX_SEQ_LENGTH \
         --save_steps 500 \
         --logging_steps 10 \
-        --deepspeed_config $DEEPSPEED_CONFIG
+        --deepspeed_config $DEEPSPEED_CONFIG \
+        $RESUME_ARG
 
     EXIT_CODE=$?
 

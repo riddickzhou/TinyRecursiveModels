@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every N steps')
     parser.add_argument('--deepspeed_config', type=str, default='LLM/SFT/ds_config.json', help='DeepSpeed config file')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
+    parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Path to checkpoint to resume from')
     args = parser.parse_args()
 
     # Disable datasets progress bars on non-main ranks
@@ -57,6 +58,7 @@ def main():
         print(f"Effective batch size: {args.batch_size * args.gradient_accumulation_steps}")
         print(f"Learning rate: {args.learning_rate}")
         print(f"DeepSpeed config: {args.deepspeed_config}")
+        print(f"Resume from checkpoint: {args.resume_from_checkpoint}")
         print("="*60)
 
     # Load tokenizer and model
@@ -151,7 +153,7 @@ def main():
         warmup_steps=100,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
-        save_total_limit=3,
+        save_total_limit=2,
         bf16=True,
         gradient_checkpointing=True,
         optim="adamw_torch",
@@ -174,8 +176,11 @@ def main():
 
     # Train
     if args.local_rank in [-1, 0]:
-        print("\nStarting training...")
-    trainer.train()
+        if args.resume_from_checkpoint:
+            print(f"\nResuming training from {args.resume_from_checkpoint}...")
+        else:
+            print("\nStarting training...")
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
     # Save final model (only rank 0)
     if args.local_rank in [-1, 0]:
