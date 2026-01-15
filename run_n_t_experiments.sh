@@ -132,8 +132,17 @@ echo ""
 # echo "### Experiment 1: 2x n - Double L_cycles (T=3, n=12) ###"
 # run_experiment 3 12 "_2xn"
 
-echo "### Experiment 2: 2x T - Double H_cycles (T=6, n=6) ###"
-run_experiment 6 6 "_2xT"
+# echo "### Experiment 2: 2x T - Double H_cycles (T=6, n=6) ###"
+# run_experiment 6 6 "_2xT"
+
+# T=3, n=9, 3
+run_experiment 3 9 ""
+run_experiment 3 3 ""
+
+# n=6, T=1, 9, 12
+run_experiment 1 6 ""
+run_experiment 9 6 ""
+run_experiment 12 6 ""
 
 # ==========================================
 # Generate Final Summary Report
