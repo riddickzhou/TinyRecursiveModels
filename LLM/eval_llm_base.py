@@ -113,11 +113,12 @@ def main():
     parser.add_argument('--max_tokens', type=int, default=8192, help='Max tokens to generate')
     parser.add_argument('--batch_size', type=int, default=256, help='Batch size for vLLM inference')
     parser.add_argument('--tensor_parallel_size', type=int, default=1, help='Number of GPUs for tensor parallelism')
+    parser.add_argument('--output_dir', type=str, default=None, help='Output directory (default: outputs/LLM/{model_name})')
     args = parser.parse_args()
 
     # Setup output directory
     model_name = Path(args.model_path).name
-    output_dir = Path(f'outputs/LLM/{model_name}')
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f'outputs/LLM/{model_name}')
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Surgical fix: active log file for append-only saving

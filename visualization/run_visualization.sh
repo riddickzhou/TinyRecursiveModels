@@ -19,20 +19,20 @@ date
 
 DATA_PATH=${1:-"data/sudoku-extreme-1k-aug-1000"}
 NUM_SAMPLES=${2:-5}
+ALL_STATES=${3:-""}  # Pass "true" to enable --all_states
 
-echo "--- Running ATT model ---"
-python visualization/visualize_latents.py \
-    --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_att_sudoku/step_65100" \
-    --data_path "$DATA_PATH" \
-    --output_dir "outputs/visualization/att" \
-    --num_samples "$NUM_SAMPLES"
+ALL_STATES_FLAG=""
+if [ "$ALL_STATES" = "true" ]; then
+    ALL_STATES_FLAG="--all_states"
+fi
 
 echo "--- Running MLP model ---"
 python visualization/visualize_latents.py \
     --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_mlp_t_sudoku/step_65100" \
     --data_path "$DATA_PATH" \
     --output_dir "outputs/visualization/mlp" \
-    --num_samples "$NUM_SAMPLES"
+    --num_samples "$NUM_SAMPLES" \
+    $ALL_STATES_FLAG
 
 echo "--- Visualization complete! ---"
 date
