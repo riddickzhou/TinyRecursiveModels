@@ -4,11 +4,12 @@
 #SBATCH --account=rl
 #SBATCH --partition=compute
 #SBATCH --qos=high
+#SBATCH --nodelist=lux-2-node-10
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:8
-#SBATCH --mem=1000G
+#SBATCH --gres=gpu:2
+#SBATCH --mem=100G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=outputs/n_t_experiments/slurm-%j.out
 
@@ -84,7 +85,7 @@ run_experiment() {
 
     # Run training - EXACT args from run_sudoku_experiments.sh MLP variant
     # Only change: arch.H_cycles and arch.L_cycles
-    WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/python -m torch.distributed.run --nproc_per_node=8 pretrain.py \
+    WANDB_MODE=online /pm/conda/envs/users/trm-sudoku/bin/python -m torch.distributed.run --nproc_per_node=2 pretrain.py \
         arch=trm \
         data_paths="[$DATA_PATH]" \
         evaluators="[]" \
