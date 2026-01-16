@@ -67,16 +67,17 @@ def extract_latents_with_adaptive_halting(model, batch, stability_threshold=2, m
     """
     num_samples = batch['inputs'].shape[0]
     unlimited = (max_steps == -1)
+    device = batch['inputs'].device
 
     with torch.no_grad():
         carry = model.initial_carry(batch)
-        carry.inner_carry.z_H = carry.inner_carry.z_H.cuda()
-        carry.inner_carry.z_L = carry.inner_carry.z_L.cuda()
-        carry.halted = carry.halted.cuda()
-        carry.steps = carry.steps.cuda()
+        carry.inner_carry.z_H = carry.inner_carry.z_H.to(device)
+        carry.inner_carry.z_L = carry.inner_carry.z_L.to(device)
+        carry.halted = carry.halted.to(device)
+        carry.steps = carry.steps.to(device)
         for k in carry.current_data:
             if isinstance(carry.current_data[k], torch.Tensor):
-                carry.current_data[k] = carry.current_data[k].cuda()
+                carry.current_data[k] = carry.current_data[k].to(device)
 
         embed_weight = model.inner.embed_tokens.embedding_weight
         puzzle_emb_len = model.inner.puzzle_emb_len
@@ -156,8 +157,8 @@ def extract_latents_with_adaptive_halting(model, batch, stability_threshold=2, m
                 final_z_L[idx] = carry.inner_carry.z_L[idx].cpu()
 
         # Reverse embed final states
-        final_z_H_stacked = torch.stack(final_z_H).cuda()
-        final_z_L_stacked = torch.stack(final_z_L).cuda()
+        final_z_H_stacked = torch.stack(final_z_H).to(device)
+        final_z_L_stacked = torch.stack(final_z_L).to(device)
 
         tokenized_zH = reverse_embed(final_z_H_stacked[:, puzzle_emb_len:], embed_weight)
         tokenized_zL = reverse_embed(final_z_L_stacked[:, puzzle_emb_len:], embed_weight)
@@ -239,7 +240,7 @@ def visualize_sudoku(data, idx, save_path):
     plt.close()
 
 
-def visualize_adaptive_states(data, idx, save_path):
+def visualize_adaptive_states(data, idx, save_path, max_plot_rows=1000):
     """Visualize intermediate states with adaptive sizing based on actual halt step."""
     states = data['all_states_per_sample'][idx]
     halt_step = data['halt_steps'][idx]
@@ -248,10 +249,10 @@ def visualize_adaptive_states(data, idx, save_path):
     if not states:
         return
 
-    # Determine actual number of supervision steps used
+    # Determine actual number of supervision steps used, cap at max_plot_rows
     actual_sup_steps = max(s['sup_step'] for s in states) + 1
     n_cols = 3  # T (H_cycles)
-    n_rows = actual_sup_steps
+    n_rows = min(actual_sup_steps, max_plot_rows)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
     if n_rows == 1:
@@ -264,6 +265,8 @@ def visualize_adaptive_states(data, idx, save_path):
 
     for state in states:
         sup_step = state['sup_step']
+        if sup_step >= max_plot_rows:
+            continue  # Skip states beyond plot limit
         h_step = state['h_step']
 
         grid = tokens_to_sudoku(state['tokenized'].numpy().reshape(9, 9))
@@ -313,6 +316,7 @@ def main():
     parser.add_argument('--stability_threshold', type=int, default=2,
                         help='Consecutive identical outputs before halting (default: 2)')
     parser.add_argument('--max_steps', type=int, default=16, help='Maximum supervision steps')
+    parser.add_argument('--num_gpus', type=int, default=1, help='Number of GPUs to use')
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -321,10 +325,16 @@ def main():
     # Determine output suffix based on max_steps
     suffix = "unlimited" if args.max_steps == -1 else str(args.max_steps)
 
+    # Setup multi-GPU
+    num_gpus = min(args.num_gpus, torch.cuda.device_count())
+    if num_gpus > 1:
+        print(f"Using {num_gpus} GPUs")
+
     print(f"=== Halting Experiment ===")
     print(f"Stability threshold: {args.stability_threshold} consecutive identical outputs")
     print(f"Max steps: {'unlimited' if args.max_steps == -1 else args.max_steps}")
-    print(f"Num samples: {args.num_samples}")
+    print(f"Num samples: {'all' if args.num_samples == -1 else args.num_samples}")
+    print(f"Num GPUs: {num_gpus}")
     print()
 
     # Load model
@@ -334,29 +344,83 @@ def main():
     # Load data
     print(f"Loading dataset: {args.data_path}")
     data_dir = Path(args.data_path) / 'test'
-    inputs = np.load(data_dir / 'all__inputs.npy', mmap_mode='r')[:args.num_samples]
-    labels = np.load(data_dir / 'all__labels.npy', mmap_mode='r')[:args.num_samples]
-    puzzle_ids = np.load(data_dir / 'all__puzzle_identifiers.npy', mmap_mode='r')[:args.num_samples]
+    all_inputs = np.load(data_dir / 'all__inputs.npy', mmap_mode='r')
+    all_labels = np.load(data_dir / 'all__labels.npy', mmap_mode='r')
+    all_puzzle_ids = np.load(data_dir / 'all__puzzle_identifiers.npy', mmap_mode='r')
 
-    batch = {
-        'inputs': torch.from_numpy(np.array(inputs)).cuda(),
-        'targets': torch.from_numpy(np.array(labels)).cuda(),
-        'puzzle_identifiers': torch.from_numpy(np.array(puzzle_ids)).cuda(),
-    }
+    # -1 means all samples
+    num_samples = len(all_inputs) if args.num_samples == -1 else args.num_samples
+    inputs = all_inputs[:num_samples]
+    labels = all_labels[:num_samples]
+    puzzle_ids = all_puzzle_ids[:num_samples]
+    print(f"Using {num_samples} samples")
 
     print("Running adaptive halting extraction...")
-    data = extract_latents_with_adaptive_halting(
-        model, batch,
-        stability_threshold=args.stability_threshold,
-        max_steps=args.max_steps
-    )
+    if num_gpus > 1:
+        # Multi-GPU: split samples and process in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        import copy
+
+        chunk_size = (num_samples + num_gpus - 1) // num_gpus
+        results = [None] * num_gpus
+
+        def process_chunk(gpu_id, start_idx, end_idx):
+            torch.cuda.set_device(gpu_id)
+            # Load model on this GPU
+            chunk_model, _ = load_checkpoint(args.checkpoint, args.data_path)
+            chunk_model = chunk_model.to(f'cuda:{gpu_id}')
+
+            chunk_batch = {
+                'inputs': torch.from_numpy(np.array(inputs[start_idx:end_idx])).to(f'cuda:{gpu_id}'),
+                'targets': torch.from_numpy(np.array(labels[start_idx:end_idx])).to(f'cuda:{gpu_id}'),
+                'puzzle_identifiers': torch.from_numpy(np.array(puzzle_ids[start_idx:end_idx])).to(f'cuda:{gpu_id}'),
+            }
+            return extract_latents_with_adaptive_halting(
+                chunk_model, chunk_batch,
+                stability_threshold=args.stability_threshold,
+                max_steps=args.max_steps
+            )
+
+        with ThreadPoolExecutor(max_workers=num_gpus) as executor:
+            futures = []
+            for gpu_id in range(num_gpus):
+                start_idx = gpu_id * chunk_size
+                end_idx = min(start_idx + chunk_size, num_samples)
+                if start_idx < end_idx:
+                    futures.append(executor.submit(process_chunk, gpu_id, start_idx, end_idx))
+
+            chunk_results = [f.result() for f in futures]
+
+        # Merge results
+        data = {
+            'predictions': torch.cat([r['predictions'] for r in chunk_results]),
+            'inputs': torch.cat([r['inputs'] for r in chunk_results]),
+            'targets': torch.cat([r['targets'] for r in chunk_results]),
+            'latent_y': torch.cat([r['latent_y'] for r in chunk_results]),
+            'latent_z': torch.cat([r['latent_z'] for r in chunk_results]),
+            'latent_y_raw': torch.cat([r['latent_y_raw'] for r in chunk_results]),
+            'latent_z_raw': torch.cat([r['latent_z_raw'] for r in chunk_results]),
+            'halt_steps': sum([r['halt_steps'] for r in chunk_results], []),
+            'all_states_per_sample': sum([r['all_states_per_sample'] for r in chunk_results], []),
+        }
+    else:
+        batch = {
+            'inputs': torch.from_numpy(np.array(inputs)).cuda(),
+            'targets': torch.from_numpy(np.array(labels)).cuda(),
+            'puzzle_identifiers': torch.from_numpy(np.array(puzzle_ids)).cuda(),
+        }
+        data = extract_latents_with_adaptive_halting(
+            model, batch,
+            stability_threshold=args.stability_threshold,
+            max_steps=args.max_steps
+        )
 
     # Compute accuracy
     predictions = data['predictions'].numpy()
     targets = data['targets'].numpy()
 
     per_sample_correct = []
-    for idx in range(args.num_samples):
+    for idx in range(num_samples):
         pred = predictions[idx]
         target = targets[idx]
         is_correct = np.array_equal(pred, target)
@@ -376,7 +440,7 @@ def main():
         'config': {
             'stability_threshold': args.stability_threshold,
             'max_steps': args.max_steps,
-            'num_samples': args.num_samples,
+            'num_samples': num_samples,
             'checkpoint': args.checkpoint,
         },
         'summary': {
@@ -392,7 +456,7 @@ def main():
                 'correct': per_sample_correct[idx],
                 'halt_step': data['halt_steps'][idx],
             }
-            for idx in range(args.num_samples)
+            for idx in range(num_samples)
         ]
     }
 
@@ -403,7 +467,7 @@ def main():
 
     # Save visualization JSON (same format as visualize_latents.py)
     json_data = []
-    for idx in range(args.num_samples):
+    for idx in range(num_samples):
         sample_data = {
             'sample_id': idx,
             'input_x': tokens_to_sudoku(data['inputs'][idx].numpy().reshape(9, 9)),
@@ -434,7 +498,7 @@ def main():
 
     # Create visualizations (only first 10 samples to save time)
     print("Creating visualizations...")
-    vis_samples = min(10, args.num_samples)
+    vis_samples = min(10, num_samples)
     for idx in range(vis_samples):
         visualize_sudoku(data, idx, output_dir / f'sample_{idx}.png')
         visualize_adaptive_states(data, idx, output_dir / f'sample_{idx}_all_states.png')

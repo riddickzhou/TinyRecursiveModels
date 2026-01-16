@@ -25,11 +25,13 @@ DATA_PATH=${1:-"data/sudoku-extreme-1k-aug-1000"}
 NUM_SAMPLES=${2:-100}
 STABILITY_THRESHOLD=${3:-2}
 MAX_STEPS=${4:--1}
+NUM_GPUS=${5:-1}
 
 echo "Data path: $DATA_PATH"
-echo "Num samples: $NUM_SAMPLES"
+echo "Num samples: $( [ "$NUM_SAMPLES" -eq -1 ] && echo 'all' || echo "$NUM_SAMPLES" )"
 echo "Stability threshold: $STABILITY_THRESHOLD"
 echo "Max steps: $( [ "$MAX_STEPS" -eq -1 ] && echo 'unlimited' || echo "$MAX_STEPS" )"
+echo "Num GPUs: $NUM_GPUS"
 echo ""
 
 # Create output directory
@@ -42,7 +44,8 @@ echo "--- Running MLP model with adaptive halting ---"
     --output_dir "outputs/halting" \
     --num_samples "$NUM_SAMPLES" \
     --stability_threshold "$STABILITY_THRESHOLD" \
-    --max_steps "$MAX_STEPS"
+    --max_steps "$MAX_STEPS" \
+    --num_gpus "$NUM_GPUS"
 
 echo ""
 echo "=== Experiment complete! ==="
