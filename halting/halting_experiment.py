@@ -96,6 +96,8 @@ def extract_latents_with_adaptive_halting(model, batch, stability_threshold=2, m
         all_states_per_sample = [[] for _ in range(num_samples)]
 
         sup_step = 0
+        pbar = tqdm(total=num_samples, desc="Samples halted", unit="sample")
+        num_halted_prev = 0
         while not all(sample_halted) and (unlimited or sup_step < max_steps):
             if sup_step == 0:
                 carry.inner_carry = model.inner.reset_carry(carry.halted, carry.inner_carry)
@@ -146,8 +148,15 @@ def extract_latents_with_adaptive_halting(model, batch, stability_threshold=2, m
             # Update carry
             carry.inner_carry = new_inner_carry
 
+            # Update progress bar
+            num_halted = sum(sample_halted)
+            pbar.update(num_halted - num_halted_prev)
+            num_halted_prev = num_halted
+
             # Increment step counter
             sup_step += 1
+
+        pbar.close()
 
         # For samples that never halted (hit safety cap), use final state
         for idx in range(num_samples):
@@ -421,7 +430,7 @@ def main():
     targets = data['targets'].numpy()
 
     per_sample_correct = []
-    for idx in tqdm(range(num_samples), desc="Computing accuracy"):
+    for idx in range(num_samples):
         pred = predictions[idx]
         target = targets[idx]
         is_correct = np.array_equal(pred, target)
