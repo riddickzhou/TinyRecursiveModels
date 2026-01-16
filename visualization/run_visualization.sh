@@ -35,5 +35,13 @@ echo "--- Running MLP model ---"
     --num_samples "$NUM_SAMPLES" \
     $ALL_STATES_FLAG
 
+echo "--- Running ATT model ---"
+/pm/conda/envs/users/trm-sudoku/bin/python visualization/visualize_latents.py \
+    --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_att_sudoku/step_65100" \
+    --data_path "$DATA_PATH" \
+    --output_dir "outputs/visualization/att" \
+    --num_samples "$NUM_SAMPLES" \
+    $ALL_STATES_FLAG
+
 echo "--- Visualization complete! ---"
 date
