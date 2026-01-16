@@ -4,6 +4,7 @@
 #SBATCH --account=rl
 #SBATCH --partition=compute
 #SBATCH --qos=high
+#SBATCH --nodelist=lux-2-node-10
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
@@ -82,8 +83,8 @@ WANDB_MODE=online $PYTHON_BIN -m torch.distributed.run --nproc_per_node=8 pretra
     weight_decay=$WEIGHT_DECAY \
     puzzle_emb_weight_decay=$PUZZLE_EMB_WEIGHT_DECAY \
     global_batch_size=256 \
-    project_name="TRM_Singley" \
-    run_name="trm_singley_training"
+    +run_name=trm_singley_training \
+    ema=True
 
 echo ""
 echo "=================================="
