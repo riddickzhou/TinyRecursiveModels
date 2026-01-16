@@ -1,0 +1,25 @@
+--- Starting Visualization ---
+Job ID: 2642
+Fri Jan 16 00:28:35 UTC 2026
+--- Running MLP model ---
+Loading checkpoint: checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_mlp_t_sudoku/step_65100
+Loading dataset: data/sudoku-extreme-1k-aug-1000
+Extracting latents...
+Saved raw data: outputs/visualization/mlp/latent_data.pt
+Saved JSON: outputs/visualization/mlp/vis_out.json
+Creating visualizations...
+Saved: outputs/visualization/mlp/sample_0.png
+Saved: outputs/visualization/mlp/sample_1.png
+Saved: outputs/visualization/mlp/sample_2.png
+Saved: outputs/visualization/mlp/sample_3.png
+Saved: outputs/visualization/mlp/sample_4.png
+Creating intermediate state visualizations...
+  Saved: outputs/visualization/mlp/sample_0_all_states.png
+  Saved: outputs/visualization/mlp/sample_1_all_states.png
+  Saved: outputs/visualization/mlp/sample_2_all_states.png
+  Saved: outputs/visualization/mlp/sample_3_all_states.png
+  Saved: outputs/visualization/mlp/sample_4_all_states.png
+
+Done! Outputs saved to: outputs/visualization/mlp
+--- Visualization complete! ---
+Fri Jan 16 00:29:08 UTC 2026
