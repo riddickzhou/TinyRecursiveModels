@@ -57,7 +57,9 @@ def reverse_embed(latent, embed_weight):
 
 
 def extract_latents(model, batch, return_all_states=False):
-    """Extract z_H and z_L from model forward pass."""
+    """Extract z_H and z_L from model forward pass with full N_sup supervision steps."""
+    N_sup = model.config.halt_max_steps  # 16 supervision steps
+
     with torch.no_grad():
         carry = model.initial_carry(batch)
         # Move carry tensors to CUDA
@@ -69,45 +71,49 @@ def extract_latents(model, batch, return_all_states=False):
             if isinstance(carry.current_data[k], torch.Tensor):
                 carry.current_data[k] = carry.current_data[k].cuda()
 
-        # Reset carry for fresh start (simulates halted=True scenario)
-        carry.inner_carry = model.inner.reset_carry(carry.halted, carry.inner_carry)
-
-        # Run inner forward with optional all_states
-        if return_all_states:
-            new_inner_carry, logits, q_logits, all_states = model.inner(
-                carry.inner_carry, batch, return_all_states=True
-            )
-        else:
-            new_inner_carry, logits, q_logits = model.inner(carry.inner_carry, batch)
-            all_states = None
-
-        z_H = new_inner_carry.z_H  # [batch, seq+puzzle_emb_len, hidden]
-        z_L = new_inner_carry.z_L
-
         # Get embedding weight
         embed_weight = model.inner.embed_tokens.embedding_weight
-
-        # Reverse embed (skip puzzle_emb positions)
         puzzle_emb_len = model.inner.puzzle_emb_len
+
+        all_states_tokenized = [] if return_all_states else None
+
+        # Run N_sup supervision steps
+        for sup_step in range(N_sup):
+            # Reset carry for fresh start on first step
+            if sup_step == 0:
+                carry.inner_carry = model.inner.reset_carry(carry.halted, carry.inner_carry)
+
+            # Run inner forward with optional all_states
+            if return_all_states:
+                new_inner_carry, logits, q_logits, step_states = model.inner(
+                    carry.inner_carry, batch, return_all_states=True
+                )
+                # Collect states from this supervision step
+                for state_type, h_step, l_step, tensor in step_states:
+                    tokenized = reverse_embed(tensor[:, puzzle_emb_len:], embed_weight)
+                    all_states_tokenized.append({
+                        'type': state_type,
+                        'sup_step': sup_step,
+                        'h_step': h_step,
+                        'l_step': l_step,
+                        'tensor': tensor.cpu(),
+                        'tokenized': tokenized.cpu(),
+                    })
+            else:
+                new_inner_carry, logits, q_logits = model.inner(carry.inner_carry, batch)
+
+            # Update carry for next supervision step (detached)
+            carry.inner_carry = new_inner_carry
+
+        z_H = carry.inner_carry.z_H
+        z_L = carry.inner_carry.z_L
+
+        # Reverse embed final states
         tokenized_zH = reverse_embed(z_H[:, puzzle_emb_len:], embed_weight)
         tokenized_zL = reverse_embed(z_L[:, puzzle_emb_len:], embed_weight)
 
-        # Get predictions
+        # Get predictions from final step
         preds = torch.argmax(logits, dim=-1)
-
-        # Process all_states if requested
-        all_states_tokenized = None
-        if return_all_states and all_states:
-            all_states_tokenized = []
-            for state_type, h_step, l_step, tensor in all_states:
-                tokenized = reverse_embed(tensor[:, puzzle_emb_len:], embed_weight)
-                all_states_tokenized.append({
-                    'type': state_type,
-                    'h_step': h_step,
-                    'l_step': l_step,
-                    'tensor': tensor.cpu(),
-                    'tokenized': tokenized.cpu(),
-                })
 
     result = {
         'z_H': z_H.cpu(),
@@ -216,7 +222,7 @@ def main():
     parser.add_argument('--data_path', type=str, required=True, help='Path to test dataset')
     parser.add_argument('--output_dir', type=str, default='outputs/visualization')
     parser.add_argument('--num_samples', type=int, default=5, help='Number of samples to visualize')
-    parser.add_argument('--all_states', action='store_true', help='Visualize all intermediate states')
+    parser.add_argument('--all_states', action='store_true', default=True, help='Visualize all intermediate states (default: True)')
     args = parser.parse_args()
 
     # Setup
@@ -283,31 +289,58 @@ def main():
     # Visualize all intermediate states if requested
     if args.all_states and 'all_states' in data:
         print("Creating intermediate state visualizations...")
-        states_dir = output_dir / 'states'
-        states_dir.mkdir(parents=True, exist_ok=True)
+
+        # Filter only y states (z_H type) - these are the predictions
+        y_states = [s for s in data['all_states'] if s['type'] == 'z_H']
+        num_y_states = len(y_states)  # Should be 16 * 3 = 48
+
+        # Layout: 16 rows (supervision steps) × 3 cols (T cycles)
+        n_rows = 16  # N_sup
+        n_cols = 3   # T (H_cycles)
 
         for idx in range(args.num_samples):
-            sample_dir = states_dir / f'sample_{idx}'
-            sample_dir.mkdir(parents=True, exist_ok=True)
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
 
-            for state_idx, state in enumerate(data['all_states']):
-                state_type = state['type']
+            for state in y_states:
+                sup_step = state['sup_step']
                 h_step = state['h_step']
-                l_step = state['l_step']
 
                 grid = tokens_to_sudoku(state['tokenized'][idx].numpy().reshape(9, 9))
                 grid = np.array(grid)
 
-                if state_type == 'z_L':
-                    title = f'z_L (H={h_step}, L={l_step})'
-                    filename = f'state_{state_idx:02d}_zL_H{h_step}_L{l_step}.png'
-                else:
-                    title = f'z_H (H={h_step})'
-                    filename = f'state_{state_idx:02d}_zH_H{h_step}.png'
+                row = sup_step
+                col = h_step
+                title = f'y (s={sup_step}, T={h_step})'
 
-                visualize_single_grid(grid, title, sample_dir / filename)
+                ax = axes[row, col]
+                ax.set_xlim(-0.5, 8.5)
+                ax.set_ylim(-0.5, 8.5)
+                ax.set_aspect('equal')
+                ax.invert_yaxis()
+                ax.set_title(title, fontsize=7)
 
-            print(f"  Saved {len(data['all_states'])} states for sample {idx}")
+                # Draw grid lines
+                for i in range(10):
+                    lw = 1.0 if i % 3 == 0 else 0.2
+                    ax.axhline(i - 0.5, color='black', linewidth=lw)
+                    ax.axvline(i - 0.5, color='black', linewidth=lw)
+
+                # Fill in numbers
+                for i in range(9):
+                    for j in range(9):
+                        if grid[i, j] != 0:
+                            ax.text(j, i, str(int(grid[i, j])), ha='center', va='center',
+                                   fontsize=5, fontweight='normal')
+
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+            plt.suptitle(f'Sample {idx}: y (prediction) across {num_y_states} iterations\n(rows=supervision steps 0-15, cols=T cycles 0-2)', fontsize=12)
+            plt.tight_layout()
+            save_path = output_dir / f'sample_{idx}_all_states.png'
+            plt.savefig(save_path, dpi=200, bbox_inches='tight')
+            plt.close()
+            print(f"  Saved: {save_path}")
 
     print(f"\nDone! Outputs saved to: {output_dir}")
 

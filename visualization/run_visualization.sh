@@ -3,7 +3,7 @@
 #SBATCH --account=rl
 #SBATCH --partition=compute
 #SBATCH --qos=high
-#SBATCH --nodelist=lux-2-node-10
+#SBATCH --nodelist=lux-2-node-09
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
