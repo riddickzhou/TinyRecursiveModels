@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 import json
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -420,7 +421,7 @@ def main():
     targets = data['targets'].numpy()
 
     per_sample_correct = []
-    for idx in range(num_samples):
+    for idx in tqdm(range(num_samples), desc="Computing accuracy"):
         pred = predictions[idx]
         target = targets[idx]
         is_correct = np.array_equal(pred, target)
@@ -499,10 +500,9 @@ def main():
     # Create visualizations (only first 10 samples to save time)
     print("Creating visualizations...")
     vis_samples = min(10, num_samples)
-    for idx in range(vis_samples):
+    for idx in tqdm(range(vis_samples), desc="Plotting samples"):
         visualize_sudoku(data, idx, output_dir / f'sample_{idx}.png')
         visualize_adaptive_states(data, idx, output_dir / f'sample_{idx}_all_states.png')
-        print(f"  Sample {idx}: halt_step={data['halt_steps'][idx]}, correct={per_sample_correct[idx]}")
 
     print(f"\nDone! Outputs saved to: {output_dir}")
 

@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:8
 #SBATCH --mem=32G
 #SBATCH --time=0-01:00:00
 #SBATCH --output=outputs/halting/slurm-%j.out
@@ -22,10 +22,10 @@ echo ""
 # Arguments with defaults
 # MAX_STEPS: -1 for unlimited (run until all samples stabilize)
 DATA_PATH=${1:-"data/sudoku-extreme-1k-aug-1000"}
-NUM_SAMPLES=${2:-100}
+NUM_SAMPLES=${2:-10000}
 STABILITY_THRESHOLD=${3:-2}
 MAX_STEPS=${4:--1}
-NUM_GPUS=${5:-1}
+NUM_GPUS=${5:-8}
 
 echo "Data path: $DATA_PATH"
 echo "Num samples: $( [ "$NUM_SAMPLES" -eq -1 ] && echo 'all' || echo "$NUM_SAMPLES" )"
