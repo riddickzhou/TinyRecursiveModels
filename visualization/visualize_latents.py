@@ -116,10 +116,10 @@ def extract_latents(model, batch, return_all_states=False):
         preds = torch.argmax(logits, dim=-1)
 
     result = {
-        'z_H': z_H.cpu(),
-        'z_L': z_L.cpu(),
-        'tokenized_zH': tokenized_zH.cpu(),
-        'tokenized_zL': tokenized_zL.cpu(),
+        'latent_y_raw': z_H.cpu(),  # y in TRM (z_H in HRM)
+        'latent_z_raw': z_L.cpu(),  # z in TRM (z_L in HRM)
+        'latent_y': tokenized_zH.cpu(),  # y tokenized
+        'latent_z': tokenized_zL.cpu(),  # z tokenized
         'predictions': preds.cpu(),
         'inputs': batch['inputs'].cpu(),
         'targets': batch['targets'].cpu(),
@@ -177,11 +177,11 @@ def visualize_sudoku(data, idx, save_path):
         to_sudoku(data['inputs'][idx].numpy().reshape(9, 9)),
         to_sudoku(data['targets'][idx].numpy().reshape(9, 9)),
         to_sudoku(data['predictions'][idx].numpy().reshape(9, 9)),
-        to_sudoku(data['tokenized_zH'][idx].numpy().reshape(9, 9)),
-        to_sudoku(data['tokenized_zL'][idx].numpy().reshape(9, 9)),
+        to_sudoku(data['latent_y'][idx].numpy().reshape(9, 9)),
+        to_sudoku(data['latent_z'][idx].numpy().reshape(9, 9)),
         None
     ]
-    titles = ['Input x', 'Output y', 'Prediction ŷ', 'Latent y\n(before lm_head)', 'Latent z\n(reasoning feature)', '']
+    titles = ['Input x', 'Target y', 'Prediction ŷ', 'Latent y\n(before lm_head)', 'Latent z\n(reasoning)', '']
     target_grid = grids[1]  # Output y is the target
 
     for grid_idx, (ax, title, grid) in enumerate(zip(axes.flat, titles, grids)):
@@ -270,15 +270,22 @@ def main():
         return arr.tolist()
 
     json_data = []
+    y_states = [s for s in data.get('all_states', []) if s['type'] == 'z_H']
     for idx in range(args.num_samples):
-        json_data.append({
+        sample_data = {
             'sample_id': idx,
-            'input': tokens_to_sudoku(data['inputs'][idx].numpy().reshape(9, 9)),
-            'target': tokens_to_sudoku(data['targets'][idx].numpy().reshape(9, 9)),
-            'prediction': tokens_to_sudoku(data['predictions'][idx].numpy().reshape(9, 9)),
-            'tokenized_zH': tokens_to_sudoku(data['tokenized_zH'][idx].numpy().reshape(9, 9)),
-            'tokenized_zL': tokens_to_sudoku(data['tokenized_zL'][idx].numpy().reshape(9, 9)),
-        })
+            'input_x': tokens_to_sudoku(data['inputs'][idx].numpy().reshape(9, 9)),
+            'target_y': tokens_to_sudoku(data['targets'][idx].numpy().reshape(9, 9)),
+            'prediction_y_hat': tokens_to_sudoku(data['predictions'][idx].numpy().reshape(9, 9)),
+            'latent_y': tokens_to_sudoku(data['latent_y'][idx].numpy().reshape(9, 9)),
+            'latent_z': tokens_to_sudoku(data['latent_z'][idx].numpy().reshape(9, 9)),
+        }
+        if y_states:
+            sample_data['intermediate_y'] = [
+                {'sup_step': s['sup_step'], 't_step': s['h_step'], 'grid': tokens_to_sudoku(s['tokenized'][idx].numpy().reshape(9, 9))}
+                for s in y_states
+            ]
+        json_data.append(sample_data)
 
     # Save JSON
     with open(output_dir / 'vis_out.json', 'w') as f:
