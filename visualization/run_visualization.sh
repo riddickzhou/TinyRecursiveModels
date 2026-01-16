@@ -19,7 +19,7 @@ echo "Job ID: $SLURM_JOB_ID"
 date
 
 DATA_PATH=${1:-"data/sudoku-extreme-1k-aug-1000"}
-NUM_SAMPLES=${2:-5}
+NUM_SAMPLES=${2:-10}
 ALL_STATES=${3:-""}  # Pass "true" to enable --all_states
 
 ALL_STATES_FLAG=""
