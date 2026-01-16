@@ -90,7 +90,7 @@ def extract_latents(model, batch, return_all_states=False):
                 )
                 # Collect states from this supervision step
                 for state_type, h_step, l_step, tensor in step_states:
-                    tokenized = reverse_embed(tensor[:, puzzle_emb_len:], embed_weight)
+                    tokenized = torch.argmax(model.inner.lm_head(tensor), dim=-1)[:, puzzle_emb_len:]
                     all_states_tokenized.append({
                         'type': state_type,
                         'sup_step': sup_step,
