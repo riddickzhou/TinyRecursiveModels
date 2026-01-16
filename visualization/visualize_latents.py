@@ -317,7 +317,7 @@ def main():
                 ax.set_ylim(-0.5, 8.5)
                 ax.set_aspect('equal')
                 ax.invert_yaxis()
-                ax.set_title(title, fontsize=7)
+                ax.set_xlabel(title, fontsize=7)
 
                 # Draw grid lines
                 for i in range(10):
@@ -336,7 +336,7 @@ def main():
                 ax.set_yticks([])
 
             plt.suptitle(f'Sample {idx}: y (prediction) across {num_y_states} iterations\n(rows=supervision steps 0-15, cols=T cycles 0-2)', fontsize=12)
-            plt.tight_layout()
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
             save_path = output_dir / f'sample_{idx}_all_states.png'
             plt.savefig(save_path, dpi=200, bbox_inches='tight')
             plt.close()
