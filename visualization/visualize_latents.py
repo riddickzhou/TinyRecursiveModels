@@ -182,8 +182,9 @@ def visualize_sudoku(data, idx, save_path):
         None
     ]
     titles = ['Input x', 'Output y', 'Prediction ŷ', 'Latent y\n(before lm_head)', 'Latent z\n(reasoning feature)', '']
+    target_grid = grids[1]  # Output y is the target
 
-    for ax, title, grid in zip(axes.flat, titles, grids):
+    for grid_idx, (ax, title, grid) in enumerate(zip(axes.flat, titles, grids)):
         if grid is not None:
             ax.set_xlim(-0.5, 8.5)
             ax.set_ylim(-0.5, 8.5)
@@ -201,6 +202,9 @@ def visualize_sudoku(data, idx, save_path):
             for i in range(9):
                 for j in range(9):
                     if grid[i, j] != 0:
+                        # For Prediction ŷ (index 2), highlight wrong cells in red
+                        if grid_idx == 2 and grid[i, j] != target_grid[i, j]:
+                            ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor='red', alpha=0.3))
                         ax.text(j, i, str(int(grid[i, j])), ha='center', va='center',
                                fontsize=20, fontweight='normal')
 
@@ -300,6 +304,7 @@ def main():
 
         for idx in range(args.num_samples):
             fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3))
+            target_grid = np.array(tokens_to_sudoku(data['targets'][idx].numpy().reshape(9, 9)))
 
             for state in y_states:
                 sup_step = state['sup_step']
@@ -329,6 +334,8 @@ def main():
                 for i in range(9):
                     for j in range(9):
                         if grid[i, j] != 0:
+                            if grid[i, j] != target_grid[i, j]:
+                                ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor='red', alpha=0.3))
                             ax.text(j, i, str(int(grid[i, j])), ha='center', va='center',
                                    fontsize=5, fontweight='normal')
 
