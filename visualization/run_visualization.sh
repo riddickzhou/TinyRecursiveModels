@@ -28,7 +28,7 @@ if [ "$ALL_STATES" = "true" ]; then
 fi
 
 echo "--- Running MLP model ---"
-python visualization/visualize_latents.py \
+/pm/conda/envs/users/trm-sudoku/bin/python visualization/visualize_latents.py \
     --checkpoint "checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/pretrain_mlp_t_sudoku/step_65100" \
     --data_path "$DATA_PATH" \
     --output_dir "outputs/visualization/mlp" \
